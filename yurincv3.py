@@ -1,63 +1,80 @@
 import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, Gdk, GLib
-import subprocess
+import dbus
+from dbus.mainloop.glib import DBusGMainLoop
 import threading
+import time
 
-class Notification(Gtk.Window):
-    def __init__(self, summary, body):
+class NotificationWindow(Gtk.Window):
+    def __init__(self, app_name, summary, body):
         super().__init__(type=Gtk.WindowType.POPUP)
         self.set_decorated(False)
         self.set_resizable(False)
-        self.set_border_width(10)
+        self.set_skip_taskbar_hint(True)
+        self.set_keep_above(True)
+        self.set_app_paintable(True)
+        self.set_default_size(360, -1)
         self.set_position(Gtk.WindowPosition.CENTER)
-        self.set_default_size(300, -1)
+        self.set_border_width(20)
 
-        # Carica lo stile CSS
         self.apply_css()
 
-        # Contenuto della notifica
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
-        self.add(box)
+        outer_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        outer_box.set_margin_top(15)
+        outer_box.set_margin_bottom(15)
+        outer_box.set_margin_start(20)
+        outer_box.set_margin_end(20)
 
         title = Gtk.Label(label=summary)
-        title.get_style_context().add_class("title")
-        box.pack_start(title, False, False, 0)
+        title.get_style_context().add_class("notif-title")
+        title.set_xalign(0)
 
         message = Gtk.Label(label=body)
-        message.get_style_context().add_class("message")
-        box.pack_start(message, False, False, 0)
+        message.get_style_context().add_class("notif-body")
+        message.set_xalign(0)
+        message.set_line_wrap(True)
 
+        outer_box.pack_start(title, False, False, 0)
+        outer_box.pack_start(message, False, False, 0)
+
+        self.add(outer_box)
         self.show_all()
-        GLib.timeout_add_seconds(5, self.destroy)  # Chiude la notifica dopo 5 secondi
+
+        # Autodistruzione dopo 5 secondi
+        GLib.timeout_add_seconds(5, self.destroy)
 
     def apply_css(self):
         css_provider = Gtk.CssProvider()
         css_provider.load_from_path("style.css")
         screen = Gdk.Screen.get_default()
         Gtk.StyleContext.add_provider_for_screen(
-            screen, css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+            screen, css_provider, Gtk.STYLE_PROVIDER_PRIORITY_USER
         )
 
-def listen_for_notifications():
-    import dbus
-    from dbus.mainloop.glib import DBusGMainLoop
+class NotificationServer:
+    def __init__(self):
+        DBusGMainLoop(set_as_default=True)
+        self.bus = dbus.SessionBus()
+        self.bus.request_name('org.freedesktop.Notifications')
+        self.bus.add_message_filter(self.filter_func)
 
-    DBusGMainLoop(set_as_default=True)
-    bus = dbus.SessionBus()
+    def filter_func(self, bus, message):
+        if message.get_member() != "Notify":
+            return
+        args = message.get_args_list()
+        app_name, replaces_id, app_icon, summary, body = args[:5]
+        GLib.idle_add(self.show_notification, app_name, summary, body)
 
-    def notify_callback(app_name, replaces_id, app_icon, summary, body, actions, hints, expire_timeout):
-        GLib.idle_add(Notification, summary, body)
+    def show_notification(self, app_name, summary, body):
+        win = NotificationWindow(app_name, summary, body)
+        win.show_all()
 
-    bus.add_signal_receiver(
-        notify_callback,
-        dbus_interface="org.freedesktop.Notifications",
-        signal_name="Notify"
-    )
-
+def start_dbus_server():
+    NotificationServer()
     loop = GLib.MainLoop()
     loop.run()
 
 if __name__ == "__main__":
-    threading.Thread(target=listen_for_notifications, daemon=True).start()
+    threading.Thread(target=start_dbus_server, daemon=True).start()
     Gtk.main()
