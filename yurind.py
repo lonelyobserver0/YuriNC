@@ -10,7 +10,7 @@ import dbus.mainloop.glib
 import os
 from pathlib import Path
 
-CONFIG_DIR = Path.home() / ".config" / "yurinotify"
+CONFIG_DIR = Path.home() / ".config" / "yurind"
 CSS_PATH = CONFIG_DIR / "style.css"
 
 class NotificationWindow(Gtk.Window):
