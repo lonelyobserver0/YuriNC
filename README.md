@@ -11,7 +11,9 @@ A real Notification Daemon (ND) that use style from .config/yurind/style.css
 ### Dependencies
 
 python (version 3 or newer)
+
 pydbus (python module) installed globally, on Arch Linux use `pacman -S python-pydbus`
+
 (ONLY FOR yurind) gobject (python module) installed globally, on Arch Linux use `pacman -S python-gobject`
 
 ### Installation
