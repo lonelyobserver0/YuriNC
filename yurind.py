@@ -1,32 +1,31 @@
 #!/usr/bin/env python3
-# Version 1.0.0
-
 import gi
-gi.require_version("Gtk", "3.0")
+import os
+from pathlib import Path
+
+gi.require_version("Gtk", "4.0")
 gi.require_version("GtkLayerShell", "0.1")
 from gi.repository import Gtk, Gdk, GLib, GObject, GtkLayerShell
 
 import dbus
 import dbus.service
 import dbus.mainloop.glib
-import os
-from pathlib import Path
 
 CONFIG_DIR = Path.home() / ".config" / "yurind"
 CSS_PATH = CONFIG_DIR / "style.css"
 
 class NotificationWindow(Gtk.Window):
-    def __init__(self, summary, body, icon, stack):
+    def __init__(self, nid, summary, body, icon, stack, actions, service):
         super().__init__()
+        self.nid = nid
         self.stack = stack
+        self.service = service
         self.set_decorated(False)
         self.set_resizable(False)
-        self.set_app_paintable(True)
-        self.set_visual(self.get_screen().get_rgba_visual())
         self.set_name("notification")
         self.set_opacity(0.0)
+        self.set_default_size(300, -1)
 
-        # LayerShell: top-right stacking
         GtkLayerShell.init_for_window(self)
         GtkLayerShell.set_layer(self, GtkLayerShell.Layer.OVERLAY)
         GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.TOP, True)
@@ -34,58 +33,57 @@ class NotificationWindow(Gtk.Window):
         GtkLayerShell.set_margin(self, GtkLayerShell.Edge.TOP, 20 + len(stack) * 100)
         GtkLayerShell.set_margin(self, GtkLayerShell.Edge.RIGHT, 20)
 
-        # Layout
-        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        box.set_border_width(12)
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12,
+                      margin_top=12, margin_bottom=12, margin_start=12, margin_end=12)
         box.get_style_context().add_class("notification-box")
 
-        # Icon
         if icon:
-            image = Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.DIALOG)
-            box.pack_start(image, False, False, 0)
+            image = Gtk.Image.new_from_icon_name(icon)
+            box.append(image)
 
-        # Text
-        text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
 
-        title = Gtk.Label(label=f"<b>{summary}</b>")
-        title.set_use_markup(True)
-        title.set_xalign(0)
-        text_box.pack_start(title, False, False, 0)
+        title = Gtk.Label(label=f"<b>{summary}</b>", use_markup=True, xalign=0)
+        content_box.append(title)
 
-        body_label = Gtk.Label(label=body)
-        body_label.set_line_wrap(True)
-        body_label.set_xalign(0)
-        text_box.pack_start(body_label, False, False, 0)
+        body_label = Gtk.Label(label=body, wrap=True, xalign=0)
+        content_box.append(body_label)
 
-        box.pack_start(text_box, True, True, 0)
+        if actions:
+            actions_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            for i in range(0, len(actions), 2):
+                action_key = actions[i]
+                label = actions[i+1]
+                button = Gtk.Button(label=label)
+                button.connect("clicked", self.on_action_clicked, action_key)
+                actions_box.append(button)
+            content_box.append(actions_box)
 
-        # Wrap it in a frame
+        box.append(content_box)
+
         frame = Gtk.Frame()
-        frame.add(box)
+        frame.set_child(box)
         frame.set_shadow_type(Gtk.ShadowType.IN)
         frame.get_style_context().add_class("notification-frame")
 
-        self.add(frame)
-        self.connect("destroy", self.on_destroy)
+        self.set_child(frame)
+
+        self.connect("close-request", self.on_close_request)
         self.connect("button-press-event", self.on_click)
-        self.show_all()
 
-        # CSS
+        self.show()
         self.load_css()
-
-        # Fade-in
         self.fade_in()
-
-        # Auto close after 4s with fade-out
-        GLib.timeout_add_seconds(4, self.fade_out)
+        # Auto chiusura dopo 4 secondi, motivo = 1 (expired)
+        GLib.timeout_add_seconds(4, self.fade_out, 1)
 
     def load_css(self):
         if not CSS_PATH.exists():
             return
         provider = Gtk.CssProvider()
         provider.load_from_path(str(CSS_PATH))
-        Gtk.StyleContext.add_provider_for_screen(
-            Gdk.Screen.get_default(),
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(),
             provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
@@ -99,10 +97,12 @@ class NotificationWindow(Gtk.Window):
             return False
         step(0.05)
 
-    def fade_out(self):
+    def fade_out(self, reason=3):
         def step(opacity):
             if opacity <= 0:
-                self.destroy()
+                self.close()
+                # Notifica chiusa con motivo 'reason'
+                self.service.NotificationClosed(self.nid, reason)
                 return False
             self.set_opacity(opacity)
             GLib.timeout_add(15, step, opacity - 0.05)
@@ -110,30 +110,54 @@ class NotificationWindow(Gtk.Window):
         step(1.0)
         return False
 
-    def on_destroy(self, *_):
+    def on_close_request(self, *_):
         if self in self.stack:
             self.stack.remove(self)
             for i, win in enumerate(self.stack):
                 GtkLayerShell.set_margin(win, GtkLayerShell.Edge.TOP, 20 + i * 100)
+        # Emissione segnale con motivo 2 = dismissed by user
+        self.service.NotificationClosed(self.nid, 2)
+        return False
 
     def on_click(self, *_):
-        print("Notifica cliccata!")
-        self.fade_out()
+        print(f"Notifica {self.nid} cliccata!")
+        self.fade_out(2)  # dismissed by user
+
+    def on_action_clicked(self, button, action_key):
+        print(f"Azione invocata: {action_key} su notifica {self.nid}")
+        bus = dbus.SessionBus()
+        obj = bus.get_object("org.freedesktop.Notifications", "/org/freedesktop/Notifications")
+        iface = dbus.Interface(obj, "org.freedesktop.Notifications")
+        iface.ActionInvoked(self.nid, action_key)
+        self.fade_out(2)  # dismissed by user
+
 
 class NotificationService(dbus.service.Object):
     def __init__(self, bus):
         self.stack = []
+        self.notifications = {}  # nid -> NotificationWindow
+        self.next_id = 1
         name = dbus.service.BusName("org.freedesktop.Notifications", bus)
         super().__init__(name, "/org/freedesktop/Notifications")
 
     @dbus.service.method("org.freedesktop.Notifications",
                          in_signature="susssasa{sv}i", out_signature="u")
     def Notify(self, app_name, replaces_id, app_icon, summary, body, actions, hints, expire_timeout):
-        GLib.idle_add(self.show_notification, summary, body, app_icon)
-        return 0
+        nid = self.next_id
+        self.next_id += 1
 
-    def show_notification(self, summary, body, icon):
-        win = NotificationWindow(summary, body, icon, self.stack)
+        if replaces_id != 0 and replaces_id in self.notifications:
+            old_win = self.notifications[replaces_id]
+            GLib.idle_add(old_win.close)
+            del self.notifications[replaces_id]
+            nid = replaces_id
+
+        GLib.idle_add(self.show_notification, nid, summary, body, app_icon, actions)
+        return nid
+
+    def show_notification(self, nid, summary, body, icon, actions):
+        win = NotificationWindow(nid, summary, body, icon, self.stack, actions, self)
+        self.notifications[nid] = win
         self.stack.append(win)
         return False
 
@@ -149,6 +173,11 @@ class NotificationService(dbus.service.Object):
             "version": "1.0",
             "spec_version": "1.2"
         }
+
+    @dbus.service.signal("org.freedesktop.Notifications", signature="uu")
+    def NotificationClosed(self, nid, reason):
+        pass
+
 
 def main():
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
