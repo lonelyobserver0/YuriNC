@@ -169,7 +169,7 @@ class NotificationService(dbus.service.Object):
     def GetServerInformation(self):
         return {
             "name": "YuriNotify",
-            "vendor": "OpenAI",
+            "vendor": "LonelyObserver0",
             "version": "1.0",
             "spec_version": "1.2"
         }
