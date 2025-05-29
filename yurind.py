@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 import gi
-import os
-from pathlib import Path
-
 gi.require_version("Gtk", "4.0")
 gi.require_version("GtkLayerShell", "0.1")
 from gi.repository import Gtk, Gdk, GLib, GObject, GtkLayerShell
 
+import os
+from pathlib import Path
+
 import dbus
 import dbus.service
 import dbus.mainloop.glib
+
 
 CONFIG_DIR = Path.home() / ".config" / "yurind"
 CSS_PATH = CONFIG_DIR / "style.css"
