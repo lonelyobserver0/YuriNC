@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
+#from ctypes import CDLL
+#CDLL('libgtk4-layer-shell.so')
+
 import gi
 gi.require_version("Gtk", "4.0")
-gi.require_version("GtkLayerShell", "0.1")
-from gi.repository import Gtk, Gdk, GLib, GObject, GtkLayerShell
+gi.require_version("Gtk4LayerShell", "1.0")
+# L'errore per il conflitto tra GTK3 e GTK4 è causato da GtkLayerShell
+from gi.repository import Gtk, Gdk, GLib, GObject, Gtk4LayerShell
 
 import os
 from pathlib import Path
