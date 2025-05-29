@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+
+# From gtk4-layer-shell docs:
 #from ctypes import CDLL
 #CDLL('libgtk4-layer-shell.so')
 
