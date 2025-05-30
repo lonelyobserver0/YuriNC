@@ -14,6 +14,7 @@ from pathlib import Path
 import dbus
 import dbus.service
 import dbus.mainloop.glib
+from dbus import UInt32
 
 
 CONFIG_DIR = Path.home() / ".config" / "yurind"
@@ -145,8 +146,7 @@ class NotificationService(dbus.service.Object):
         name = dbus.service.BusName("org.freedesktop.Notifications", bus)
         super().__init__(name, "/org/freedesktop/Notifications")
 
-    @dbus.service.method("org.freedesktop.Notifications",
-                     in_signature="susssasa{sv}i", out_signature="u")
+    @dbus.service.method("org.freedesktop.Notifications", in_signature="susssasa{sv}i", out_signature="u")
     def Notify(self, app_name, replaces_id, app_icon, summary, body, actions, hints, expire_timeout):
         nid = self.next_id
         self.next_id += 1
