@@ -199,4 +199,4 @@ def main1():
     loop.run()
 
 if __name__ == "__main__":
-    main1()
+    main()
