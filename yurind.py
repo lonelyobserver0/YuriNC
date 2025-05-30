@@ -146,7 +146,7 @@ class NotificationService(dbus.service.Object):
         super().__init__(name, "/org/freedesktop/Notifications")
 
     @dbus.service.method("org.freedesktop.Notifications",
-                         in_signature="susssasa{sv}i", out_signature="u")
+                     in_signature="susssasa{sv}i", out_signature="u")
     def Notify(self, app_name, replaces_id, app_icon, summary, body, actions, hints, expire_timeout):
         nid = self.next_id
         self.next_id += 1
@@ -158,7 +158,8 @@ class NotificationService(dbus.service.Object):
             nid = replaces_id
 
         GLib.idle_add(self.show_notification, nid, summary, body, app_icon, actions)
-        return nid
+        return UInt32(nid)
+
 
     def show_notification(self, nid, summary, body, icon, actions):
         win = NotificationWindow(nid, summary, body, icon, self.stack, actions, self)
