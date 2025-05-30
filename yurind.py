@@ -158,7 +158,7 @@ class NotificationService(dbus.service.Object):
             nid = replaces_id
 
         GLib.idle_add(self.show_notification, nid, summary, body, app_icon, actions)
-        return int(nid) #UInt32(nid)
+        return UInt32(nid)
 
 
     def show_notification(self, nid, summary, body, icon, actions):
