@@ -15,6 +15,7 @@ import dbus
 import dbus.service
 import dbus.mainloop.glib
 from dbus import UInt32
+import ctypes
 
 
 CONFIG_DIR = Path.home() / ".config" / "yurind"
@@ -158,7 +159,7 @@ class NotificationService(dbus.service.Object):
             nid = replaces_id
 
         GLib.idle_add(self.show_notification, nid, summary, body, app_icon, actions)
-        return UInt32(nid)
+        return ctypes.c_uint32(nid).value
 
 
     def show_notification(self, nid, summary, body, icon, actions):
