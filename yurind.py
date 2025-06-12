@@ -2,6 +2,12 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gtk4LayerShell", "1.0")
 
+# È fondamentale caricare esplicitamente la libreria gtk4-layer-shell
+# prima di qualsiasi inizializzazione di GTK o Gtk4LayerShell.
+# Questo garantisce che le funzionalità del layer shell siano disponibili.
+from ctypes import CDLL
+CDLL('libgtk4-layer-shell.so')
+
 from gi.repository import Gtk, Gdk, GLib, GObject, Gtk4LayerShell
 import os
 from pathlib import Path
@@ -9,75 +15,66 @@ import dbus
 import dbus.service
 import dbus.mainloop.glib
 
-# Scommenta questa riga se riscontri errori relativi a 'libgtk4-layer-shell' non trovata
-# from ctypes import CDLL
-# CDLL('libgtk4-layer-shell.so')
-
-# Definisce il percorso per la directory di configurazione e il file CSS
+# Percorsi per la configurazione e il CSS
 CONFIG_DIR = Path.home() / ".config" / "yurind"
 CSS_PATH = CONFIG_DIR / "style.css"
 
 class NotificationWindow(Gtk.Window):
     """
-    Rappresenta una singola finestra di notifica sullo schermo.
-    Gestisce la visualizzazione, le animazioni e le interazioni dell'utente.
+    Rappresenta una singola finestra di notifica GTK4.
+    Gestisce la visualizzazione, le animazioni, le interazioni e il posizionamento.
     """
-    def __init__(self, nid, summary, body, icon, stack, service):
+    def __init__(self, nid, summary, body, icon, stack, actions, service):
         super().__init__()
         self.nid = nid  # ID univoco della notifica
-        self.stack = stack  # Riferimento allo stack di notifiche del servizio (per il posizionamento)
+        self.stack = stack  # Riferimento allo stack globale delle notifiche attive
         self.service = service  # Riferimento al servizio D-Bus per la comunicazione
         self.auto_close_timeout_id = None # ID per il timer di auto-chiusura
 
-        self.set_decorated(False) # Rimuove la decorazione della finestra (bordi, barra del titolo)
+        # Configurazione base della finestra GTK
+        self.set_decorated(False) # Rimuove bordi e barra del titolo
         self.set_resizable(False) # Impedisce il ridimensionamento
-        self.set_name("notification") # Imposta un nome per il targeting CSS
-        self.set_opacity(0.0) # Inizia completamente trasparente per l'animazione di fade-in
-        self.set_default_size(300, -1) # Larghezza fissa di 300px, altezza automatica
+        self.set_name("notification") # Nome per il targeting CSS
+        self.set_opacity(0.0) # Inizialmente trasparente per l'animazione
+        self.set_default_size(300, -1) # Larghezza fissa, altezza automatica
 
-        # Inizializza gtk4-layer-shell per la finestra
+        # Inizializzazione e configurazione con gtk4-layer-shell
         Gtk4LayerShell.init_for_window(self)
-        # Imposta il livello su OVERLAY per essere sempre sopra altre finestre
-        Gtk4LayerShell.set_layer(self, Gtk4LayerShell.Layer.OVERLAY)
-        # Ancoraggio in alto a destra dello schermo
-        Gtk4LayerShell.set_anchor(self, Gtk4LayerShell.Edge.TOP, True)
-        Gtk4LayerShell.set_anchor(self, Gtk4LayerShell.Edge.RIGHT, True)
-        # Imposta i margini iniziali. Il margine superiore dipende dal numero di notifiche già presenti.
+        Gtk4LayerShell.set_layer(self, Gtk4LayerShell.Layer.OVERLAY) # Sempre sopra altre finestre
+        Gtk4LayerShell.set_anchor(self, Gtk4LayerShell.Edge.TOP, True) # Ancoraggio in alto
+        Gtk4LayerShell.set_anchor(self, Gtk4LayerShell.Edge.RIGHT, True) # Ancoraggio a destra
+        # Margine iniziale basato sulla posizione nello stack
         Gtk4LayerShell.set_margin(self, Gtk4LayerShell.Edge.TOP, 20 + len(stack) * 100)
         Gtk4LayerShell.set_margin(self, Gtk4LayerShell.Edge.RIGHT, 20)
 
-        # Crea un box orizzontale per il contenuto principale della notifica
+        # Costruzione dell'interfaccia utente della notifica
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12,
                       margin_top=12, margin_bottom=12, margin_start=12, margin_end=12)
-        box.get_style_context().add_class("notification-box") # Aggiunge una classe per il CSS
+        box.get_style_context().add_class("notification-box")
 
-        # Aggiunge l'icona se fornita
         if icon:
             try:
-                # Tenta di creare l'immagine da un nome di icona (es. "dialog-information")
+                # Tenta di caricare l'icona dal nome
                 image = Gtk.Image.new_from_icon_name(icon)
                 box.append(image)
             except GLib.Error as e:
-                # Gestisce l'errore se l'icona non viene trovata o è invalida
-                print(f"Errore nel caricamento dell'icona '{icon}': {e}")
-                # Puoi scegliere di aggiungere un'icona di fallback qui se necessario
-                pass # Continua senza icona se c'è un errore
+                print(f"Avviso: Errore nel caricamento dell'icona '{icon}': {e}")
+                # Continua senza icona in caso di errore
 
-        # Box verticale per titolo e corpo della notifica
         content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
 
-        # Titolo della notifica (supporta markup per il grassetto e allineamento a sinistra)
+        # Titolo in grassetto
         title = Gtk.Label(label=f"<b>{summary}</b>", use_markup=True, xalign=0)
         content_box.append(title)
 
-        # Corpo della notifica (testo che si adatta a più righe e allineamento a sinistra)
+        # Corpo della notifica con wrapping del testo
         body_label = Gtk.Label(label=body, wrap=True, xalign=0)
         content_box.append(body_label)
 
-        # Aggiunge i pulsanti delle azioni se presenti
+        # Pulsanti delle azioni
         if actions:
             actions_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-            for i in range(0, len(actions), 2): # Le azioni sono coppie (action_key, label)
+            for i in range(0, len(actions), 2):
                 action_key = actions[i]
                 label = actions[i+1]
                 button = Gtk.Button(label=label)
@@ -87,30 +84,29 @@ class NotificationWindow(Gtk.Window):
 
         box.append(content_box)
 
-        # Crea un frame attorno al contenuto della notifica per lo stile e l'ombra
+        # Frame per lo stile visivo
         frame = Gtk.Frame()
         frame.set_child(box)
-        frame.set_shadow_type(Gtk.ShadowType.IN) # Tipo di ombra (puoi cambiarlo o rimuoverlo)
-        frame.get_style_context().add_class("notification-frame") # Aggiunge una classe per il CSS
+        frame.set_shadow_type(Gtk.ShadowType.IN)
+        frame.get_style_context().add_class("notification-frame")
 
         self.set_child(frame)
 
-        # Connessioni ai segnali GTK
+        # Connessioni agli eventi
         self.connect("close-request", self.on_close_request)
-
-        # Utilizza Gtk.GestureClick per gestire i click sulla finestra (moderno approccio GTK4)
+        # Gtk.GestureClick è il modo moderno per gestire i click in GTK4
         gesture = Gtk.GestureClick.new()
-        gesture.connect("released", self.on_click_released) # Connessione all'evento di rilascio del click
-        self.add_controller(gesture) # Aggiunge il controller dei gesti alla finestra
+        gesture.connect("released", self.on_click_released)
+        self.add_controller(gesture)
 
-        self.show() # Mostra la finestra GTK
-        self.load_css() # Carica il CSS per applicare lo stile
-        self.fade_in() # Avvia l'animazione di fade-in
-
-        # L'auto-chiusura verrà impostata dal NotificationService in base a expire_timeout
+        self.show() # Mostra la finestra
+        self.load_css() # Carica lo stile CSS
+        self.fade_in() # Avvia l'animazione di apparizione
+        # Il timer di auto-chiusura è ora gestito dal NotificationService
+        # in base al parametro expire_timeout ricevuto da D-Bus.
 
     def load_css(self):
-        """Carica il foglio di stile CSS dal percorso specificato."""
+        """Carica il file CSS per applicare lo stile alla notifica."""
         if not CSS_PATH.exists():
             print(f"Avviso: File CSS non trovato in {CSS_PATH}")
             return
@@ -126,91 +122,76 @@ class NotificationWindow(Gtk.Window):
             print(f"Errore nel caricamento del CSS da {CSS_PATH}: {e}")
 
     def fade_in(self):
-        """Avvia l'animazione di fade-in per la finestra della notifica."""
+        """Animazione di apparizione (fade-in) della notifica."""
         def step(opacity):
-            if not self.is_visible(): # Interrompi l'animazione se la finestra non è più visibile
-                return False
+            if not self.is_visible(): return False # Interrompi se già chiusa
             if opacity >= 1.0:
-                self.set_opacity(1.0) # Assicura che l'opacità sia piena alla fine
+                self.set_opacity(1.0)
                 return False
             self.set_opacity(opacity)
-            # Continua l'animazione dopo 15ms con un incremento di opacità
             GLib.timeout_add(15, step, opacity + 0.05)
             return False
-        step(0.05) # Inizia l'animazione da un'opacità quasi trasparente
+        step(0.05)
 
     def fade_out(self, reason=3):
         """
-        Avvia l'animazione di fade-out per la finestra della notifica
-        e gestisce la sua chiusura e pulizia.
+        Animazione di scomparsa (fade-out) della notifica e sua successiva chiusura.
+        reason: Motivo della chiusura (1=expired, 2=dismissed by user, 3=closed by call, 4=undefined).
         """
-        # Rimuovi il timer di auto-chiusura se è attivo, per evitare chiamate multiple
+        # Rimuovi il timer di auto-chiusura se attivo, per prevenire chiamate multiple
         if self.auto_close_timeout_id:
             GLib.source_remove(self.auto_close_timeout_id)
             self.auto_close_timeout_id = None
 
         def step(opacity):
-            if not self.is_visible(): # Interrompi se la finestra è già stata chiusa
-                return False
+            if not self.is_visible(): return False # Interrompi se già chiusa
             if opacity <= 0:
-                self.set_opacity(0.0) # Assicura che l'opacità sia zero alla fine
-                self.close() # Chiude la finestra GTK (distrugge il widget)
+                self.set_opacity(0.0)
+                self.close() # Chiude la finestra GTK (la distrugge)
                 # Notifica al servizio di pulire lo stato relativo a questa notifica
                 self.service.notification_closed_cleanup(self.nid, reason)
                 return False
             self.set_opacity(opacity)
-            # Continua l'animazione dopo 15ms con un decremento di opacità
             GLib.timeout_add(15, step, opacity - 0.05)
             return False
-        step(1.0) # Inizia l'animazione da opacità piena
-        return False # Importante per i timer di GLib.timeout_add_seconds
+        step(1.0)
+        return False
 
     def on_close_request(self, *_):
-        """
-        Gestisce la richiesta di chiusura della notifica (es. da gestore finestre).
-        Avvia il fade-out con motivo 'dismissed by user'.
-        """
-        print(f"Richiesta di chiusura per notifica {self.nid} (da gestore finestre).")
-        self.fade_out(2) # Motivo 2 = dismissed by user (chiuso dall'utente)
-        return True # Indica che abbiamo gestito l'evento, impedendo la chiusura predefinita di GTK
+        """Gestisce la richiesta di chiusura della finestra (es. da gestore finestre)."""
+        print(f"Richiesta di chiusura (sistema) per notifica {self.nid}")
+        self.fade_out(2) # Motivo 2 = dismissed by user
+        return True # Indica che abbiamo gestito l'evento
 
     def on_click_released(self, gesture, n_press, x, y):
-        """
-        Gestisce il click dell'utente sulla notifica.
-        Avvia il fade-out con motivo 'dismissed by user'.
-        """
-        print(f"Notifica {self.nid} cliccata! Coordinate: ({x:.2f}, {y:.2f})")
-        self.fade_out(2) # Motivo 2 = dismissed by user (chiuso dall'utente)
+        """Gestisce il click dell'utente sulla notifica."""
+        print(f"Notifica {self.nid} cliccata!")
+        self.fade_out(2) # Motivo 2 = dismissed by user
 
     def on_action_clicked(self, button, action_key):
-        """
-        Gestisce il click su un pulsante di azione della notifica.
-        Invocare l'azione D-Bus e poi chiude la notifica.
-        """
+        """Gestisce il click su un pulsante di azione."""
         print(f"Azione invocata: '{action_key}' su notifica {self.nid}")
         try:
-            # Crea una connessione al bus di sessione D-Bus
+            # Invoca l'azione D-Bus sul bus di sessione
             bus = dbus.SessionBus()
-            # Ottiene l'oggetto D-Bus per il servizio di notifica
             obj = bus.get_object("org.freedesktop.Notifications", "/org/freedesktop/Notifications")
-            # Ottiene l'interfaccia D-Bus per le notifiche
             iface = dbus.Interface(obj, "org.freedesktop.Notifications")
-            # Invocare il metodo ActionInvoked sul servizio D-Bus
             iface.ActionInvoked(dbus.UInt32(self.nid), action_key)
         except dbus.DBusException as e:
-            print(f"Errore nell'invocazione dell'azione D-Bus per {self.nid}, azione '{action_key}': {e}")
-        self.fade_out(2) # Motivo 2 = dismissed by user (chiuso dall'utente)
+            print(f"Errore D-Bus nell'invocazione dell'azione: {e}")
+        self.fade_out(2) # Motivo 2 = dismissed by user
 
 
 class NotificationService(dbus.service.Object):
     """
     Implementa il servizio D-Bus 'org.freedesktop.Notifications'.
-    Gestisce le notifiche in arrivo, il loro impilamento e la loro chiusura.
+    È il cuore del demone, gestisce le notifiche in arrivo, la loro gestione interna
+    e l'emissione di segnali D-Bus.
     """
     def __init__(self, bus):
-        self.stack = [] # Stack di NotificationWindow per gestire l'impilamento visivo delle notifiche
-        self.notifications = {}  # Dizionario nid -> NotificationWindow per accedere rapidamente alle notifiche attive
-        self.next_id = 1 # ID per la prossima notifica da assegnare
+        self.stack = [] # Lista di NotificationWindow per l'ordinamento visivo
+        self.notifications = {}  # Mappa ID notifica -> oggetto NotificationWindow
+        self.next_id = 1 # Prossimo ID disponibile per una nuova notifica
 
         # Registra il nome del servizio D-Bus sul bus di sessione
         name = dbus.service.BusName("org.freedesktop.Notifications", bus)
@@ -220,101 +201,84 @@ class NotificationService(dbus.service.Object):
     @dbus.service.method("org.freedesktop.Notifications", in_signature="susssasa{sv}i", out_signature="u")
     def Notify(self, app_name, replaces_id, app_icon, summary, body, actions, hints, expire_timeout):
         """
-        Implementa il metodo D-Bus Notify per ricevere nuove notifiche.
-        Crea o aggiorna una finestra di notifica.
+        Metodo D-Bus chiamato per inviare una nuova notifica.
+        Gestisce la creazione di una nuova finestra o la sostituzione di una esistente.
         """
         nid = self.next_id
-        self.next_id += 1 # Pre-incrementa per il prossimo ID
+        self.next_id += 1
 
         print(f"Ricevuta notifica: '{summary}' (App: {app_name}, Rimpiazza ID: {replaces_id}, Timeout: {expire_timeout}ms)")
 
-        # Gestisce la sostituzione di una notifica esistente
+        # Gestione della sostituzione di notifiche esistenti
         if replaces_id != 0 and replaces_id in self.notifications:
             old_win = self.notifications[replaces_id]
-            print(f"Sostituzione notifica esistente ID {replaces_id}. Nuova notifica avrà ID {replaces_id}.")
-            # Chiudi la vecchia finestra UI in modo asincrono nel thread GTK
-            # La pulizia dallo stack e dal dizionario avverrà tramite notification_closed_cleanup
+            print(f"Sostituzione notifica ID {replaces_id}.")
+            # Chiude la vecchia finestra in modo asincrono, la pulizia avverrà tramite cleanup
             GLib.idle_add(old_win.close)
             nid = replaces_id # Riutilizza l'ID della notifica sostituita
 
-        # Programma la creazione e visualizzazione della nuova notifica nel thread GTK
+        # Programma la visualizzazione della nuova notifica nel thread principale GTK
         GLib.idle_add(self.show_notification, nid, summary, body, app_icon, actions, expire_timeout)
-        return dbus.UInt32(nid)
+        return dbus.UInt32(nid) # Restituisce l'ID della notifica
 
     def show_notification(self, nid, summary, body, icon, actions, expire_timeout):
         """
-        Crea e mostra una nuova finestra di notifica GTK.
-        Questa funzione viene chiamata nel thread principale di GTK.
+        Crea e aggiunge una nuova NotificationWindow allo stack e al dizionario.
+        Imposta anche il timer di auto-chiusura.
         """
-        win = NotificationWindow(nid, summary, body, icon, self.stack, self)
-        self.notifications[nid] = win # Aggiunge la notifica al dizionario delle notifiche attive
-        self.stack.append(win) # Aggiunge la notifica allo stack visivo
+        win = NotificationWindow(nid, summary, body, icon, self.stack, actions, self)
+        self.notifications[nid] = win
+        self.stack.append(win)
 
-        # Imposta il timer di auto-chiusura in base a expire_timeout
-        if expire_timeout == -1: # -1 significa che la notifica non deve scadere automaticamente
+        # Configura il timer di auto-chiusura in base al parametro D-Bus
+        if expire_timeout == -1: # Notifica persistente
             print(f"Notifica {nid} non scadrà automaticamente.")
-            if win.auto_close_timeout_id: # Se per qualche ragione c'era un timer, rimuovilo
-                GLib.source_remove(win.auto_close_timeout_id)
-                win.auto_close_timeout_id = None
         else:
-            # Se expire_timeout è 0, usa un default di 4 secondi
+            # Se expire_timeout è 0, usa un default di 4 secondi (secondo la spec D-Bus)
             actual_timeout_seconds = (expire_timeout / 1000) if expire_timeout > 0 else 4
             print(f"Notifica {nid} scadrà in {actual_timeout_seconds} secondi.")
-            if win.auto_close_timeout_id: # Rimuovi il vecchio timer se esiste già
+            if win.auto_close_timeout_id: # Rimuovi il vecchio timer se presente
                 GLib.source_remove(win.auto_close_timeout_id)
-            # Aggiungi il nuovo timer di auto-chiusura, motivo 1 = expired
-            win.auto_close_timeout_id = GLib.timeout_add_seconds(actual_timeout_seconds, win.fade_out, 1)
+            win.auto_close_timeout_id = GLib.timeout_add_seconds(actual_timeout_seconds, win.fade_out, 1) # Motivo 1 = expired
 
-        # Ricalcola i margini per tutte le notifiche impilate dopo l'aggiunta di una nuova
-        self._recalculate_margins()
+        self._recalculate_margins() # Ricalcola i margini per tutte le notifiche impilate
         return False # Importante per GLib.idle_add
 
     def notification_closed_cleanup(self, nid, reason):
         """
-        Metodo chiamato dalla NotificationWindow quando si chiude (dopo l'animazione di fade-out).
-        Esegue la pulizia dello stato nel servizio e emette il segnale D-Bus.
+        Esegue la pulizia dello stato del servizio quando una notifica viene chiusa.
+        Rimuove la notifica dagli elenchi interni ed emette il segnale D-Bus.
         """
-        print(f"Pulizia per notifica {nid} iniziata. Motivo: {reason}")
+        print(f"Pulizia per notifica {nid} (Motivo: {reason}).")
         if nid in self.notifications:
-            win = self.notifications.pop(nid) # Rimuove la notifica dal dizionario attivo
-
+            win = self.notifications.pop(nid) # Rimuove dal dizionario
             if win in self.stack:
-                self.stack.remove(win) # Rimuove la notifica dallo stack visivo
-                self._recalculate_margins() # Ricalcola i margini delle notifiche rimanenti
+                self.stack.remove(win) # Rimuove dallo stack visivo
+                self._recalculate_margins() # Ricalcola i margini delle rimanenti
             else:
                 print(f"Avviso: Notifica {nid} trovata in .notifications ma non nello stack.")
 
             # Emette il segnale D-Bus NotificationClosed
             self.NotificationClosed(dbus.UInt32(nid), dbus.UInt32(reason))
         else:
-            print(f"Avviso: Tentativo di pulire una notifica (ID: {nid}) non trovata nel dizionario.")
+            print(f"Avviso: Tentativo di pulire una notifica (ID: {nid}) non trovata.")
 
     def _recalculate_margins(self):
-        """
-        Ricalcola e imposta i margini superiori per tutte le notifiche attualmente nello stack.
-        Questo assicura che le notifiche siano impilate correttamente.
-        """
+        """Ricalcola e imposta i margini superiori per tutte le notifiche nello stack visivo."""
         for i, win in enumerate(self.stack):
-            current_margin = Gtk4LayerShell.get_margin(win, Gtk4LayerShell.Edge.TOP)
-            # Assumiamo un'altezza media di 100px per notifica per il calcolo del margine di impilamento
-            new_margin = 20 + i * 100
-            if current_margin != new_margin:
+            new_margin = 20 + i * 100 # Margine base + 100px per ogni notifica precedente
+            if Gtk4LayerShell.get_margin(win, Gtk4LayerShell.Edge.TOP) != new_margin:
                 Gtk4LayerShell.set_margin(win, Gtk4LayerShell.Edge.TOP, new_margin)
                 # print(f"Aggiornato margine per notifica {win.nid} a {new_margin}")
 
     @dbus.service.method("org.freedesktop.Notifications", out_signature="as")
     def GetCapabilities(self):
-        """
-        Restituisce le capacità supportate dal servizio di notifica.
-        """
-        # Il servizio supporta testo nel corpo, azioni e icone per nome.
+        """Restituisce le capacità supportate dal servizio di notifica."""
         return ["body", "actions", "icon-names"]
 
     @dbus.service.method("org.freedesktop.Notifications", out_signature="a{sv}")
     def GetServerInformation(self):
-        """
-        Restituisce le informazioni sul server di notifica.
-        """
+        """Restituisce le informazioni sul server di notifica."""
         return {
             "name": "YuriNotify",
             "vendor": "LonelyObserver0",
@@ -324,27 +288,18 @@ class NotificationService(dbus.service.Object):
 
     @dbus.service.signal("org.freedesktop.Notifications", signature="uu")
     def NotificationClosed(self, nid, reason):
-        """
-        Segnale D-Bus emesso quando una notifica viene chiusa.
-        nid: ID della notifica.
-        reason: Motivo della chiusura (1=expired, 2=dismissed by user, 3=closed by call, 4=undefined).
-        """
+        """Segnale D-Bus emesso quando una notifica viene chiusa."""
         pass # Il segnale viene emesso automaticamente dal decoratore
 
 def main():
-    """
-    Funzione principale per avviare il servizio di notifica.
-    """
+    """Funzione principale per avviare il demone di notifica."""
     # Inizializza il loop principale GLib per l'integrazione D-Bus e GTK.
-    # Questo è fondamentale per gestire eventi da entrambi i sistemi.
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
-    session_bus = dbus.SessionBus() # Ottiene un riferimento al bus di sessione D-Bus
-    NotificationService(session_bus) # Istanzia e avvia il servizio di notifica
+    session_bus = dbus.SessionBus() # Connette al bus di sessione D-Bus
+    NotificationService(session_bus) # Avvia il servizio di notifica
 
-    # Avvia il loop principale di GLib. Questo blocco l'esecuzione dello script
-    # e attende gli eventi D-Bus o GTK.
     print("Avvio del loop principale di GLib. Il servizio è in ascolto...")
-    GLib.MainLoop().run()
+    GLib.MainLoop().run() # Avvia il loop di eventi (blocca l'esecuzione qui)
 
 if __name__ == "__main__":
     main()
