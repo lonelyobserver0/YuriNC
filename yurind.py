@@ -26,6 +26,7 @@ class NotificationWindow(Gtk.Window):
     """
     def __init__(self, nid, summary, body, icon, stack, actions, service):
         super().__init__()
+        self.set_app_id("yurinotify-notification")
         self.nid = nid  # ID univoco della notifica
         self.stack = stack  # Riferimento allo stack globale delle notifiche attive
         self.service = service  # Riferimento al servizio D-Bus per la comunicazione
